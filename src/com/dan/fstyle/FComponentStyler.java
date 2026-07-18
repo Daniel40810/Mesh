@@ -1,5 +1,6 @@
 package com.dan.fstyle;
 
+import com.dan.fbutton.FButton;
 import com.dan.flabel.FLabel;
 
 import javax.swing.JComponent;
@@ -70,25 +71,120 @@ public final class FComponentStyler {
      * {@link FTheme#removeThemeListener} manuell wieder entfernt werden.
      */
     public static FTheme.ThemeListener bindLabel(final FLabel label) {
-        styleLabel(label);
-        final WeakReference<FLabel> ref = new WeakReference<FLabel>(label);
+        return bindComponent(label, STYLE_LABEL);
+    }
+
+    // ============================================================== FButton
+
+    /** Überträgt den aktuellen Theme-Zustand einmalig auf {@code button}. */
+    public static void styleButton(FButton button) {
+        if (button == null) return;
+        FTheme t = FTheme.getInstance();
+
+        // Farben
+        button.setLiquidColorTop(t.getPrimary());
+        button.setLiquidColorBottom(t.getAccent());
+        button.setGlassRim(t.getGlassRim());
+        button.setGlassBody(t.getGlassBody());
+        button.setGlassHighlight(t.getGlassHighlight());
+        button.setShadowColor(t.getShadow());
+        button.setRippleColor(t.getRipple());
+        button.setNormalTextColor(t.getText());
+        button.setHoverTextColor(FColors.lighten(t.getText(), 0.18f));
+
+        // Schrift
+        button.setFont(t.getFont(FFontRole.BUTTON));
+
+        // Animation
+        FAnimationConfig a = t.getAnimationConfig();
+        button.setHoverEaseIn(a.hoverEaseIn);
+        button.setHoverEaseOut(a.hoverEaseOut);
+        button.setRippleSpeed(a.rippleSpeed);
+        button.setRippleFade(a.rippleFade);
+
+        // Geometrie
+        FGeometryConfig g = t.getGeometryConfig();
+        button.setPadX(g.padX);
+        button.setPadY(g.padY);
+        button.setArc(g.arc);
+        button.setRimStrokeWidth(g.rimStrokeWidth);
+        button.setAccentHeight(g.accentHeight);
+    }
+
+    /**
+     * Wie {@link #styleButton(FButton)}, registriert die Komponente aber zusätzlich
+     * für Live-Updates (Weak-Listener, GC-sicher).
+     *
+     * <p>Ersetzt {@code FButton.bindTheme(Object)}: jenes Reflection-Binding erwartet
+     * eine Theme-API ({@code getLiquidColorTop()}, {@code addPropertyChangeListener()}),
+     * die {@link FTheme} nie hatte — der Aufruf scheiterte bisher lautlos und wirkte nie.
+     * Dieser Weg bindet direkt gegen die echte {@link FTheme}-API.</p>
+     */
+    public static FTheme.ThemeListener bindButton(final FButton button) {
+        return bindComponent(button, STYLE_BUTTON);
+    }
+
+    // ============================================================== generisch
+
+    /**
+     * Ein einzelner Theme-Anwender für eine Komponente vom Typ {@code T}.
+     * Zusammen mit {@link #bindComponent} erspart das jeder neuen Komponentenfamilie
+     * das eigene Weak-Listener-Boilerplate (bisher pro Komponente dupliziert, in
+     * {@code FButton} sogar über kaputtes Reflection statt echtem Typzugriff).
+     */
+    public interface FThemeApplier<T extends JComponent> {
+        void apply(T component, FTheme theme);
+    }
+
+    private static final FThemeApplier<FLabel> STYLE_LABEL = new FThemeApplier<FLabel>() {
+        @Override public void apply(FLabel label, FTheme theme) { styleLabel(label); }
+    };
+
+    private static final FThemeApplier<FButton> STYLE_BUTTON = new FThemeApplier<FButton>() {
+        @Override public void apply(FButton button, FTheme theme) { styleButton(button); }
+    };
+
+    /**
+     * Generische Live-Bindung: wendet {@code applier} sofort an und danach bei jeder
+     * Theme-Änderung erneut. Die Komponente wird nur über eine {@link WeakReference}
+     * gehalten &mdash; sobald sie vom GC eingesammelt wurde, meldet sich der Listener beim
+     * nächsten Theme-Wechsel selbst vom {@link FTheme}-Singleton ab (kein Leak).
+     *
+     * <pre>{@code
+     * // Neue Komponentenfamilie anbinden, ohne eigenes Weak-Listener-Boilerplate:
+     * FComponentStyler.bindComponent(myWidget, (w, theme) -> {
+     *     w.setBackground(theme.getSurface());
+     *     w.setForeground(theme.getText());
+     * });
+     * }</pre>
+     *
+     * @param component Zielkomponente (nicht {@code null})
+     * @param applier    liest Werte aus dem Theme und setzt sie auf {@code component}
+     * @return der registrierte Listener, manuell entfernbar via
+     *         {@link FTheme#removeThemeListener}
+     */
+    public static <T extends JComponent> FTheme.ThemeListener bindComponent(
+            final T component, final FThemeApplier<T> applier) {
+        if (component == null || applier == null) return null;
+
+        applier.apply(component, FTheme.getInstance());
+
+        final WeakReference<T> ref = new WeakReference<T>(component);
         final FTheme.ThemeListener[] holder = new FTheme.ThemeListener[1];
         FTheme.ThemeListener l = new FTheme.ThemeListener() {
             @Override public void themeChanged(FTheme theme) {
-                FLabel lb = ref.get();
-                if (lb == null) {
+                T c = ref.get();
+                if (c == null) {
                     theme.removeThemeListener(holder[0]); // selbst abmelden
                     return;
                 }
-                styleLabel(lb);
+                applier.apply(c, theme);
             }
         };
         holder[0] = l;
         FTheme.getInstance().addThemeListener(l);
         return l;
     }
-
-    // ============================================================== generisch
 
     /** Setzt Schrift (per Rolle) und Vordergrundfarbe aus dem Theme. */
     public static void applyText(JComponent c, FFontRole role) {

@@ -439,7 +439,15 @@ public class FButton extends JButton {
      * }</pre>
      *
      * @param fTheme Instanz von {@code com.dan.fstyle.FTheme} (oder {@code null}).
+     * @deprecated Erwartet eine Theme-API ({@code getLiquidColorTop()},
+     *             {@code addPropertyChangeListener(PropertyChangeListener)}), die
+     *             {@code com.dan.fstyle.FTheme} nie besaß (echte Getter: {@code getPrimary()}/
+     *             {@code getAccent()}; echter Listener: {@code FTheme.ThemeListener}). Der
+     *             Reflection-Aufruf scheitert daher lautlos &mdash; dieses Binding wirkt nie.
+     *             Nutze stattdessen {@code com.dan.fstyle.FComponentStyler.bindButton(this)},
+     *             das direkt (ohne Reflection) gegen die echte {@code FTheme}-API bindet.
      */
+    @Deprecated
     public void bindTheme(Object fTheme) {
         // altes Binding sauber lösen
         if (themeRef != null && themeRef.get() != null && themeListener != null) {
