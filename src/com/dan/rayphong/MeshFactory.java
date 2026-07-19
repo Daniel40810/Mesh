@@ -19,6 +19,7 @@ public final class MeshFactory {
     public static Mesh sphere(float radius, int stacks, int slices) {
         List<Vec3> positions = new ArrayList<Vec3>();
         List<Vec3> normals = new ArrayList<Vec3>();
+        List<Vec2> uvs = new ArrayList<Vec2>();
 
         for (int i = 0; i <= stacks; i++) {
             float v = (float) i / stacks;              // 0..1
@@ -35,6 +36,8 @@ public final class MeshFactory {
                 Vec3 n = new Vec3(x, y, z); // bereits Einheitsvektor auf Einheitskugel
                 positions.add(n.scale(radius));
                 normals.add(n);
+                // Standard äquirektangulare UV-Mapping: u = Längengrad, v = Breitengrad (Pol=0, Pol=1)
+                uvs.add(new Vec2(u, v));
             }
         }
 
@@ -59,7 +62,7 @@ public final class MeshFactory {
             }
         }
 
-        return toMesh(positions, normals, faces);
+        return toMesh(positions, normals, uvs, faces);
     }
 
     /**
@@ -72,53 +75,87 @@ public final class MeshFactory {
 
         List<Vec3> positions = new ArrayList<Vec3>();
         List<Vec3> normals = new ArrayList<Vec3>();
+        List<Vec2> uvs = new ArrayList<Vec2>();
         List<Integer> faces = new ArrayList<Integer>();
 
         // Für jede der 6 Seiten: 4 Vertices mit gemeinsamer Flach-Normalen, 2 Dreiecke (CCW nach außen)
-        addQuadFace(positions, normals, faces,
+        addQuadFace(positions, normals, uvs, faces,
                 new Vec3(-h, -h, h), new Vec3(h, -h, h), new Vec3(h, h, h), new Vec3(-h, h, h),
                 new Vec3(0, 0, 1)); // +Z (vorne)
 
-        addQuadFace(positions, normals, faces,
+        addQuadFace(positions, normals, uvs, faces,
                 new Vec3(h, -h, -h), new Vec3(-h, -h, -h), new Vec3(-h, h, -h), new Vec3(h, h, -h),
                 new Vec3(0, 0, -1)); // -Z (hinten)
 
-        addQuadFace(positions, normals, faces,
+        addQuadFace(positions, normals, uvs, faces,
                 new Vec3(h, -h, h), new Vec3(h, -h, -h), new Vec3(h, h, -h), new Vec3(h, h, h),
                 new Vec3(1, 0, 0)); // +X (rechts)
 
-        addQuadFace(positions, normals, faces,
+        addQuadFace(positions, normals, uvs, faces,
                 new Vec3(-h, -h, -h), new Vec3(-h, -h, h), new Vec3(-h, h, h), new Vec3(-h, h, -h),
                 new Vec3(-1, 0, 0)); // -X (links)
 
-        addQuadFace(positions, normals, faces,
+        addQuadFace(positions, normals, uvs, faces,
                 new Vec3(-h, h, h), new Vec3(h, h, h), new Vec3(h, h, -h), new Vec3(-h, h, -h),
                 new Vec3(0, 1, 0)); // +Y (oben)
 
-        addQuadFace(positions, normals, faces,
+        addQuadFace(positions, normals, uvs, faces,
                 new Vec3(-h, -h, -h), new Vec3(h, -h, -h), new Vec3(h, -h, h), new Vec3(-h, -h, h),
                 new Vec3(0, -1, 0)); // -Y (unten)
 
-        return toMesh(positions, normals, faces);
+        return toMesh(positions, normals, uvs, faces);
     }
 
     /**
      * Flache, horizontale Bodenebene bei y=0 (Normale (0,1,0)), zentriert im Ursprung.
      * Gleiche Wickelrichtung wie die +Y-Seite von {@link #cube(float)} (verifiziert korrekt).
+     * UV läuft 0..1 über die gesamte Fläche (keine Kachelung) — für Wiederholungs-Texturen
+     * (Boden-Material) siehe {@link #plane(float, float, float, float)}.
      */
     public static Mesh plane(float width, float depth) {
+        return plane(width, depth, 1f, 1f);
+    }
+
+    /**
+     * Wie {@link #plane(float, float)}, aber mit Kachel-Faktor: UV läuft 0..{@code uTiles} bzw.
+     * 0..{@code vTiles} statt 0..1. Damit eine Textur dabei sichtbar wiederholt statt gestreckt
+     * wird, muss sie mit {@link com.dan.rayphong.texture.Texture.WrapMode#REPEAT} (Standard)
+     * gesampelt werden — {@code Texture} macht das bereits automatisch.
+     *
+     * @param uTiles Wiederholungen entlang X (Breite), &gt;0
+     * @param vTiles Wiederholungen entlang Z (Tiefe), &gt;0
+     */
+    public static Mesh plane(float width, float depth, float uTiles, float vTiles) {
         float hw = width / 2f;
         float hd = depth / 2f;
 
         List<Vec3> positions = new ArrayList<Vec3>();
         List<Vec3> normals = new ArrayList<Vec3>();
+        List<Vec2> uvs = new ArrayList<Vec2>();
         List<Integer> faces = new ArrayList<Integer>();
 
-        addQuadFace(positions, normals, faces,
-                new Vec3(-hw, 0, hd), new Vec3(hw, 0, hd), new Vec3(hw, 0, -hd), new Vec3(-hw, 0, -hd),
-                new Vec3(0, 1, 0));
+        // Gleiche Eckpunkt-/Wickelreihenfolge wie addQuadFace, aber mit skalierten UVs statt
+        // fest 0..1 — addQuadFace selbst bleibt unangetastet (wird auch von cube() genutzt,
+        // das nie gekachelt werden soll).
+        positions.add(new Vec3(-hw, 0, hd));
+        positions.add(new Vec3(hw, 0, hd));
+        positions.add(new Vec3(hw, 0, -hd));
+        positions.add(new Vec3(-hw, 0, -hd));
+        for (int i = 0; i < 4; i++) {
+            normals.add(new Vec3(0, 1, 0));
+        }
+        uvs.add(new Vec2(0, 0));
+        uvs.add(new Vec2(uTiles, 0));
+        uvs.add(new Vec2(uTiles, vTiles));
+        uvs.add(new Vec2(0, vTiles));
+        faces.add(0);
+        faces.add(1);
+        faces.add(2);
+        faces.add(0);
+        faces.add(2);
+        faces.add(3);
 
-        return toMesh(positions, normals, faces);
+        return toMesh(positions, normals, uvs, faces);
     }
 
     /**
@@ -132,6 +169,7 @@ public final class MeshFactory {
     public static Mesh torus(float majorRadius, float minorRadius, int majorSegments, int minorSegments) {
         List<Vec3> positions = new ArrayList<Vec3>();
         List<Vec3> normals = new ArrayList<Vec3>();
+        List<Vec2> uvs = new ArrayList<Vec2>();
 
         for (int i = 0; i <= majorSegments; i++) {
             float u = (float) (2 * Math.PI * i / majorSegments);
@@ -151,6 +189,8 @@ public final class MeshFactory {
 
                 positions.add(pos);
                 normals.add(normal);
+                // u/v normiert auf 0..1 (Ring-Umlauf / Rohr-Umlauf)
+                uvs.add(new Vec2((float) i / majorSegments, (float) j / minorSegments));
             }
         }
 
@@ -174,10 +214,10 @@ public final class MeshFactory {
             }
         }
 
-        return toMesh(positions, normals, faces);
+        return toMesh(positions, normals, uvs, faces);
     }
 
-    private static void addQuadFace(List<Vec3> positions, List<Vec3> normals, List<Integer> faces,
+    private static void addQuadFace(List<Vec3> positions, List<Vec3> normals, List<Vec2> uvs, List<Integer> faces,
                                      Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3, Vec3 normal) {
         int base = positions.size();
         positions.add(p0);
@@ -187,6 +227,11 @@ public final class MeshFactory {
         for (int i = 0; i < 4; i++) {
             normals.add(normal);
         }
+        // Standard-Quad-UV-Mapping, passend zur Wickelreihenfolge unten (0,0)->(1,0)->(1,1)->(0,1)
+        uvs.add(new Vec2(0, 0));
+        uvs.add(new Vec2(1, 0));
+        uvs.add(new Vec2(1, 1));
+        uvs.add(new Vec2(0, 1));
         faces.add(base);
         faces.add(base + 1);
         faces.add(base + 2);
@@ -195,13 +240,14 @@ public final class MeshFactory {
         faces.add(base + 3);
     }
 
-    private static Mesh toMesh(List<Vec3> positions, List<Vec3> normals, List<Integer> faces) {
+    private static Mesh toMesh(List<Vec3> positions, List<Vec3> normals, List<Vec2> uvs, List<Integer> faces) {
         Vec3[] pArr = positions.toArray(new Vec3[0]);
         Vec3[] nArr = normals.toArray(new Vec3[0]);
+        Vec2[] uvArr = uvs.toArray(new Vec2[0]);
         int[] fArr = new int[faces.size()];
         for (int i = 0; i < fArr.length; i++) {
             fArr[i] = faces.get(i);
         }
-        return new Mesh(pArr, nArr, fArr);
+        return new Mesh(pArr, nArr, uvArr, fArr);
     }
 }

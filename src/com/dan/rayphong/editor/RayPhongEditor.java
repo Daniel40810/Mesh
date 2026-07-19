@@ -53,6 +53,18 @@ public final class RayPhongEditor {
     private FLabel diffuseLabel;
     private FLabel specularLabel;
     private FLabel shininessLabel;
+    // Textur-Zuweisungen (Diffuse-/Specular-/Normal-Map) pro Objekt
+    private FLabel diffuseMapLabel;
+    private FLabel specularMapLabel;
+    private FLabel normalMapLabel;
+    private FSlider normalStrengthSlider;
+    private FLabel normalStrengthLabel;
+    // Environment-Reflexion (Fresnel) pro Objekt
+    private FLabel environmentMapLabel;
+    private FSlider reflectivitySlider;
+    private FLabel reflectivityLabel;
+    private FSlider fresnelF0Slider;
+    private FLabel fresnelF0Label;
     private FAccordion accordion;
     private boolean refreshingControls = false;
 
@@ -367,7 +379,153 @@ public final class RayPhongEditor {
         });
         p.add(sliderBlock(shininessLabel, shininessSlider));
 
+        p.add(separator());
+        FLabel texturesHeading = new FLabel("Texturen");
+        texturesHeading.setAccentVisible(true);
+        p.add(texturesHeading);
+
+        diffuseMapLabel = new FLabel("Diffuse: keine");
+        p.add(textureRow(diffuseMapLabel,
+                loadTextureButton("Diffuse-Textur laden...",
+                        (slot, path) -> slot.diffuseMapPath = path, diffuseMapLabel, "Diffuse"),
+                clearTextureButton((slot) -> slot.diffuseMapPath = null, diffuseMapLabel, "Diffuse")));
+
+        specularMapLabel = new FLabel("Specular: keine");
+        p.add(textureRow(specularMapLabel,
+                loadTextureButton("Specular-Textur laden...",
+                        (slot, path) -> slot.specularMapPath = path, specularMapLabel, "Specular"),
+                clearTextureButton((slot) -> slot.specularMapPath = null, specularMapLabel, "Specular")));
+
+        normalMapLabel = new FLabel("Normal: keine");
+        p.add(textureRow(normalMapLabel,
+                loadTextureButton("Normal-Map laden...",
+                        (slot, path) -> slot.normalMapPath = path, normalMapLabel, "Normal"),
+                clearTextureButton((slot) -> slot.normalMapPath = null, normalMapLabel, "Normal")));
+
+        normalStrengthLabel = new FLabel("Normal-Stärke: 1.00");
+        normalStrengthSlider = new FSlider(0, 200, 100);
+        normalStrengthSlider.addChangeListener(e -> {
+            float v = normalStrengthSlider.getValue() / 100f;
+            normalStrengthLabel.setText("Normal-Stärke: " + fmt(v));
+            if (refreshingControls) {
+                return;
+            }
+            RayPhongScene.ObjectSlot slot = scene.selected();
+            if (slot != null) {
+                slot.normalMapStrength = v;
+                viewport.markDirty();
+            }
+        });
+        p.add(sliderBlock(normalStrengthLabel, normalStrengthSlider));
+
+        p.add(separator());
+        FLabel reflectionHeading = new FLabel("Spiegelung (Fresnel)");
+        reflectionHeading.setAccentVisible(true);
+        p.add(reflectionHeading);
+
+        environmentMapLabel = new FLabel("Environment: keine (Himmel-Fallback)");
+        FButton clearEnvBtn = new FButton("Entfernen");
+        clearEnvBtn.addActionListener(e -> {
+            RayPhongScene.ObjectSlot slot = scene.selected();
+            if (slot != null) {
+                slot.environmentMapPath = null;
+                environmentMapLabel.setText("Environment: keine (Himmel-Fallback)");
+                viewport.markDirty();
+            }
+        });
+        p.add(textureRow(environmentMapLabel,
+                loadTextureButton("Environment-Map laden (äquirektangular)...",
+                        (slot, path) -> slot.environmentMapPath = path, environmentMapLabel, "Environment"),
+                clearEnvBtn));
+
+        reflectivityLabel = new FLabel("Reflexionsstärke: 0.00");
+        reflectivitySlider = new FSlider(0, 100, 0);
+        reflectivitySlider.addChangeListener(e -> {
+            float v = reflectivitySlider.getValue() / 100f;
+            reflectivityLabel.setText("Reflexionsstärke: " + fmt(v));
+            if (refreshingControls) {
+                return;
+            }
+            RayPhongScene.ObjectSlot slot = scene.selected();
+            if (slot != null) {
+                slot.reflectivity = v;
+                viewport.markDirty();
+            }
+        });
+        p.add(sliderBlock(reflectivityLabel, reflectivitySlider));
+
+        fresnelF0Label = new FLabel("Fresnel F0: 0.04");
+        fresnelF0Slider = new FSlider(0, 100, 4);
+        fresnelF0Slider.addChangeListener(e -> {
+            float v = fresnelF0Slider.getValue() / 100f;
+            fresnelF0Label.setText("Fresnel F0: " + fmt(v));
+            if (refreshingControls) {
+                return;
+            }
+            RayPhongScene.ObjectSlot slot = scene.selected();
+            if (slot != null) {
+                slot.fresnelF0 = v;
+                viewport.markDirty();
+            }
+        });
+        p.add(sliderBlock(fresnelF0Label, fresnelF0Slider));
+
         return p;
+    }
+
+    /** Funktionales Interface fürs Zuweisen eines Textur-Pfads auf ein ObjectSlot-Feld. */
+    private interface TexturePathSetter {
+        void set(RayPhongScene.ObjectSlot slot, String path);
+    }
+
+    /** Baut einen "Laden..."-Button, der den gewählten Dateipfad per {@code setter} im Slot ablegt. */
+    private FButton loadTextureButton(String dialogTitle, TexturePathSetter setter, FLabel label, String prefix) {
+        FButton button = new FButton("Laden...");
+        button.addActionListener(e -> {
+            File f = FFileChooser.showOpenDialog(frame, dialogTitle);
+            if (f != null) {
+                RayPhongScene.ObjectSlot slot = scene.selected();
+                if (slot != null) {
+                    setter.set(slot, f.getAbsolutePath());
+                    label.setText(prefix + ": " + f.getName());
+                    viewport.markDirty();
+                }
+            }
+        });
+        return button;
+    }
+
+    /** Baut einen "Entfernen"-Button, der den Textur-Pfad im Slot wieder auf {@code null} setzt. */
+    private FButton clearTextureButton(java.util.function.Consumer<RayPhongScene.ObjectSlot> clearer,
+                                        FLabel label, String prefix) {
+        FButton button = new FButton("Entfernen");
+        button.addActionListener(e -> {
+            RayPhongScene.ObjectSlot slot = scene.selected();
+            if (slot != null) {
+                clearer.accept(slot);
+                label.setText(prefix + ": keine");
+                viewport.markDirty();
+            }
+        });
+        return button;
+    }
+
+    /** Zeile: Dateiname-Label oben, Laden-/Entfernen-Buttons darunter — wie {@link #sliderBlock}. */
+    private JPanel textureRow(FLabel fileLabel, FButton loadButton, FButton clearButton) {
+        JPanel buttonRow = new JPanel();
+        buttonRow.setOpaque(true);
+        buttonRow.setBackground(PANEL_BG);
+        buttonRow.setLayout(new BoxLayout(buttonRow, BoxLayout.X_AXIS));
+        buttonRow.add(loadButton);
+        buttonRow.add(javax.swing.Box.createHorizontalStrut(6));
+        buttonRow.add(clearButton);
+
+        JPanel wrap = new JPanel(new BorderLayout());
+        wrap.setOpaque(true);
+        wrap.setBackground(PANEL_BG);
+        wrap.add(fileLabel, BorderLayout.NORTH);
+        wrap.add(buttonRow, BorderLayout.CENTER);
+        return wrap;
     }
 
     /** Liest die Werte des aktuell gewählten Objekts in die Material-/Mesh-Kontrollen zurück. */
@@ -386,6 +544,18 @@ public final class RayPhongEditor {
         specularLabel.setText("Specular: " + fmt(slot.specularK));
         shininessSlider.setValue(Math.round(slot.shininess));
         shininessLabel.setText("Glanz: " + Math.round(slot.shininess));
+
+        diffuseMapLabel.setText("Diffuse: " + fileNameOrNone(slot.diffuseMapPath));
+        specularMapLabel.setText("Specular: " + fileNameOrNone(slot.specularMapPath));
+        normalMapLabel.setText("Normal: " + fileNameOrNone(slot.normalMapPath));
+        normalStrengthSlider.setValue(Math.round(slot.normalMapStrength * 100));
+        normalStrengthLabel.setText("Normal-Stärke: " + fmt(slot.normalMapStrength));
+
+        environmentMapLabel.setText("Environment: " + fileNameOrNoneWithFallback(slot.environmentMapPath));
+        reflectivitySlider.setValue(Math.round(slot.reflectivity * 100));
+        reflectivityLabel.setText("Reflexionsstärke: " + fmt(slot.reflectivity));
+        fresnelF0Slider.setValue(Math.round(slot.fresnelF0 * 100));
+        fresnelF0Label.setText("Fresnel F0: " + fmt(slot.fresnelF0));
 
         int kindIdx;
         switch (slot.meshKind) {
@@ -441,6 +611,17 @@ public final class RayPhongEditor {
         });
         p.add(shadowBox);
 
+        p.add(new FLabel("Schatten-Qualität"));
+        FComboBox cascadeBox = new FComboBox(new String[] {
+                "Einzel-Map (Standard)", "2 Kaskaden", "3 Kaskaden", "4 Kaskaden"
+        });
+        cascadeBox.setSelectedIndex(slot.shadowCascades - 1);
+        cascadeBox.addActionListener(e -> {
+            slot.shadowCascades = cascadeBox.getSelectedIndex() + 1;
+            viewport.markDirty();
+        });
+        p.add(cascadeBox);
+
         return p;
     }
 
@@ -466,6 +647,39 @@ public final class RayPhongEditor {
             viewport.markDirty();
         });
         p.add(resBox);
+
+        p.add(separator());
+        FLabel groundHeading = new FLabel("Boden-Material");
+        groundHeading.setAccentVisible(true);
+        p.add(groundHeading);
+
+        FLabel groundTexLabel = new FLabel("Textur: " + fileNameOrNone(scene.groundDiffuseMapPath));
+        FButton loadGroundTexBtn = new FButton("Laden...");
+        loadGroundTexBtn.addActionListener(e -> {
+            File f = FFileChooser.showOpenDialog(frame, "Boden-Textur laden");
+            if (f != null) {
+                scene.groundDiffuseMapPath = f.getAbsolutePath();
+                groundTexLabel.setText("Textur: " + f.getName());
+                viewport.markDirty();
+            }
+        });
+        FButton clearGroundTexBtn = new FButton("Entfernen");
+        clearGroundTexBtn.addActionListener(e -> {
+            scene.groundDiffuseMapPath = null;
+            groundTexLabel.setText("Textur: keine");
+            viewport.markDirty();
+        });
+        p.add(textureRow(groundTexLabel, loadGroundTexBtn, clearGroundTexBtn));
+
+        FLabel groundTilingLabel = new FLabel("Kacheln: " + fmt(scene.groundTiling));
+        FSlider groundTilingSlider = new FSlider(1, 40, Math.round(scene.groundTiling));
+        groundTilingSlider.addChangeListener(e -> {
+            float v = groundTilingSlider.getValue();
+            groundTilingLabel.setText("Kacheln: " + fmt(v));
+            scene.groundTiling = v;
+            viewport.markDirty();
+        });
+        p.add(sliderBlock(groundTilingLabel, groundTilingSlider));
 
         p.add(new FLabel("Ziehen = Kamera drehen, Mausrad = Zoom"));
 
@@ -511,5 +725,19 @@ public final class RayPhongEditor {
 
     private static String fmt(float v) {
         return String.format(Locale.GERMANY, "%.2f", v);
+    }
+
+    private static String fileNameOrNone(String path) {
+        if (path == null) {
+            return "keine";
+        }
+        return new File(path).getName();
+    }
+
+    private static String fileNameOrNoneWithFallback(String path) {
+        if (path == null) {
+            return "keine (Himmel-Fallback)";
+        }
+        return new File(path).getName();
     }
 }

@@ -32,6 +32,13 @@ public final class RayPhongSnapshot {
         public final float diffuseK;
         public final float specularK;
         public final float shininess;
+        public final String diffuseMapPath;
+        public final String specularMapPath;
+        public final String normalMapPath;
+        public final float normalMapStrength;
+        public final String environmentMapPath;
+        public final float reflectivity;
+        public final float fresnelF0;
 
         Obj(RayPhongScene.ObjectSlot s) {
             this.meshKind = s.meshKind;
@@ -43,6 +50,13 @@ public final class RayPhongSnapshot {
             this.diffuseK = s.diffuseK;
             this.specularK = s.specularK;
             this.shininess = s.shininess;
+            this.diffuseMapPath = s.diffuseMapPath;     // String ist unveraenderlich
+            this.specularMapPath = s.specularMapPath;
+            this.normalMapPath = s.normalMapPath;
+            this.normalMapStrength = s.normalMapStrength;
+            this.environmentMapPath = s.environmentMapPath;
+            this.reflectivity = s.reflectivity;
+            this.fresnelF0 = s.fresnelF0;
         }
     }
 
@@ -52,12 +66,14 @@ public final class RayPhongSnapshot {
         public final float intensity;
         public final boolean shadowEnabled;
         public final Vec3 position;
+        public final int shadowCascades;
 
         Light(RayPhongScene.LightSlot l) {
             this.color = l.color;
             this.intensity = l.intensity;
             this.shadowEnabled = l.shadowEnabled;
             this.position = l.position;
+            this.shadowCascades = l.shadowCascades;
         }
     }
 
@@ -66,6 +82,8 @@ public final class RayPhongSnapshot {
     public final Light light2;
     public final Color ambientColor;
     public final float ambientIntensity;
+    public final String groundDiffuseMapPath;
+    public final float groundTiling;
     public final int shadowResolution;
     public final float modelRotationY;
     public final float cameraYaw;
@@ -88,6 +106,8 @@ public final class RayPhongSnapshot {
         this.light2 = new Light(scene.light2);
         this.ambientColor = scene.ambientColor;
         this.ambientIntensity = scene.ambientIntensity;
+        this.groundDiffuseMapPath = scene.groundDiffuseMapPath;
+        this.groundTiling = scene.groundTiling;
         this.shadowResolution = scene.shadowResolution;
         this.modelRotationY = scene.modelRotationY;
         this.cameraYaw = scene.cameraYaw;

@@ -1,6 +1,8 @@
 package com.dan.rayphong.editor;
 
 import com.dan.rayphong.*;
+import com.dan.rayphong.texture.Texture;
+import com.dan.rayphong.texture.TextureManager;
 
 import java.awt.Color;
 import java.awt.image.BufferedImage;
@@ -42,6 +44,10 @@ public final class RayPhongRenderer {
     // dieselbe Datei neu parst.
     private static final Map<String, Mesh> OBJ_CACHE = new HashMap<String, Mesh>();
 
+    // Analog: TextureManager cached bereits intern nach Dateipfad (siehe TextureManager.loadFromFile),
+    // eine einzige Instanz über alle Frames/Objekte hinweg reicht daher aus.
+    private static final TextureManager TEXTURE_MANAGER = new TextureManager();
+
     private RayPhongRenderer() {
     }
 
@@ -64,7 +70,7 @@ public final class RayPhongRenderer {
             triangleCount += mesh.triangleCount();
         }
 
-        Mesh groundMesh = MeshFactory.plane(GROUND_SIZE, GROUND_SIZE);
+        Mesh groundMesh = MeshFactory.plane(GROUND_SIZE, GROUND_SIZE, snap.groundTiling, snap.groundTiling);
         Mat4 groundModel = Mat4.identity();
 
         PointLight l1 = new PointLight(snap.light1.position, snap.light1.color, snap.light1.intensity);
@@ -74,11 +80,9 @@ public final class RayPhongRenderer {
         lights.add(l2);
 
         Vec3 sceneCenter = averageCenter(snap.objects);
-        List<ShadowMap> shadowMaps = new ArrayList<ShadowMap>();
-        shadowMaps.add(buildShadowMapIfEnabled(snap.light1, meshes, models, sceneCenter, snap.shadowResolution));
-        shadowMaps.add(buildShadowMapIfEnabled(snap.light2, meshes, models, sceneCenter, snap.shadowResolution));
 
-        // Kamera-Orbit aus Yaw/Pitch/Distance um den Szenen-Mittelpunkt.
+        // Kamera-Orbit aus Yaw/Pitch/Distance um den Szenen-Mittelpunkt — VOR den Shadow Maps
+        // berechnet, da Cascaded Shadow Maps die Kamera-Frustum-Parameter brauchen.
         float cy = (float) Math.cos(snap.cameraPitch);
         Vec3 offset = new Vec3(
                 cy * (float) Math.sin(snap.cameraYaw) * snap.cameraDistance,
@@ -86,8 +90,19 @@ public final class RayPhongRenderer {
                 cy * (float) Math.cos(snap.cameraYaw) * snap.cameraDistance
         );
         Vec3 cameraPos = sceneCenter.add(offset);
-        Mat4 view = Mat4.lookAt(cameraPos, sceneCenter, new Vec3(0, 1, 0));
-        Mat4 projection = Mat4.perspective((float) Math.toRadians(50), (float) width / height, 0.1f, 100f);
+        Vec3 worldUp = new Vec3(0, 1, 0);
+        Mat4 view = Mat4.lookAt(cameraPos, sceneCenter, worldUp);
+        float fovY = (float) Math.toRadians(50);
+        float aspect = (float) width / height;
+        float cameraNear = 0.1f;
+        float cameraFar = 100f;
+        Mat4 projection = Mat4.perspective(fovY, aspect, cameraNear, cameraFar);
+
+        List<ShadowSource> shadowMaps = new ArrayList<ShadowSource>();
+        shadowMaps.add(buildShadowMapIfEnabled(snap.light1, meshes, models, sceneCenter, snap.shadowResolution,
+                cameraPos, worldUp, fovY, aspect, cameraNear, cameraFar));
+        shadowMaps.add(buildShadowMapIfEnabled(snap.light2, meshes, models, sceneCenter, snap.shadowResolution,
+                cameraPos, worldUp, fovY, aspect, cameraNear, cameraFar));
 
         BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
         int bg = new Color(0x12, 0x14, 0x1E).getRGB();
@@ -100,6 +115,12 @@ public final class RayPhongRenderer {
         Rasterizer.clearZBuffer(zBuffer);
 
         PhongMaterial groundMaterial = PhongMaterial.matte(new Color(0xB0, 0xBA, 0xC4));
+        if (snap.groundDiffuseMapPath != null) {
+            Texture groundTex = loadTextureSafe(snap.groundDiffuseMapPath);
+            if (groundTex != null) {
+                groundMaterial = groundMaterial.withDiffuseMap(groundTex);
+            }
+        }
         PhongShader groundShader = new PhongShader(groundMaterial, cameraPos, lights, shadowMaps,
                 snap.ambientColor, snap.ambientIntensity);
         Rasterizer.render(groundMesh, groundModel, view, projection, image, zBuffer, groundShader);
@@ -108,6 +129,7 @@ public final class RayPhongRenderer {
             RayPhongSnapshot.Obj obj = snap.objects.get(i);
             PhongMaterial material = new PhongMaterial(obj.baseColor, Color.WHITE,
                     obj.ambientK, obj.diffuseK, obj.specularK, obj.shininess);
+            material = applyTextures(material, obj);
             PhongShader shader = new PhongShader(material, cameraPos, lights, shadowMaps,
                     snap.ambientColor, snap.ambientIntensity);
             Rasterizer.render(meshes.get(i), models.get(i), view, projection, image, zBuffer, shader);
@@ -115,6 +137,48 @@ public final class RayPhongRenderer {
 
         long t1 = System.currentTimeMillis();
         return new Result(image, t1 - t0, triangleCount);
+    }
+
+    /**
+     * Wendet optionale Diffuse-/Specular-/Normal-Map-Pfade aus dem Snapshot auf ein Material an.
+     * Fehlschlagende Ladeversuche (Datei gelöscht/verschoben) werden geloggt und einfach
+     * übersprungen — ein Renderdurchlauf soll dadurch nicht abstürzen.
+     */
+    private static PhongMaterial applyTextures(PhongMaterial material, RayPhongSnapshot.Obj obj) {
+        if (obj.diffuseMapPath != null) {
+            Texture tex = loadTextureSafe(obj.diffuseMapPath);
+            if (tex != null) {
+                material = material.withDiffuseMap(tex);
+            }
+        }
+        if (obj.specularMapPath != null) {
+            Texture tex = loadTextureSafe(obj.specularMapPath);
+            if (tex != null) {
+                material = material.withSpecularMap(tex);
+            }
+        }
+        if (obj.normalMapPath != null) {
+            Texture tex = loadTextureSafe(obj.normalMapPath);
+            if (tex != null) {
+                material = material.withNormalMap(tex, obj.normalMapStrength);
+            }
+        }
+        if (obj.reflectivity > 0f) {
+            Texture envTex = obj.environmentMapPath != null ? loadTextureSafe(obj.environmentMapPath) : null;
+            // envTex bleibt null, wenn kein Pfad gesetzt ist ODER das Laden fehlschlägt —
+            // PhongShader greift dann automatisch auf den prozeduralen Himmel-Fallback zurück.
+            material = material.withReflection(envTex, obj.reflectivity, obj.fresnelF0);
+        }
+        return material;
+    }
+
+    private static Texture loadTextureSafe(String path) {
+        try {
+            return TEXTURE_MANAGER.loadFromFile(path);
+        } catch (IOException ex) {
+            System.err.println("Textur konnte nicht geladen werden: " + path + " (" + ex.getMessage() + ")");
+            return null;
+        }
     }
 
     private static Vec3 averageCenter(List<RayPhongSnapshot.Obj> objects) {
@@ -131,21 +195,36 @@ public final class RayPhongRenderer {
         return new Vec3(x / n, y / n, z / n);
     }
 
-    private static ShadowMap buildShadowMapIfEnabled(RayPhongSnapshot.Light light, List<Mesh> meshes,
-                                                      List<Mat4> models, Vec3 sceneCenter, int resolution) {
+    /**
+     * Baut die {@link ShadowSource} für ein Licht: klassische Einzel-Map bei
+     * {@code shadowCascades <= 1} (rückwärtskompatibel, identisch zu Phase 3/5), sonst eine
+     * {@link CascadedShadowMap} mit der im Slot gewählten Kaskaden-Anzahl.
+     */
+    private static ShadowSource buildShadowMapIfEnabled(RayPhongSnapshot.Light light, List<Mesh> meshes,
+                                                         List<Mat4> models, Vec3 sceneCenter, int resolution,
+                                                         Vec3 cameraPos, Vec3 worldUp, float fovY, float aspect,
+                                                         float cameraNear, float cameraFar) {
         if (!light.shadowEnabled) {
             return null;
         }
-        Vec3 dir = sceneCenter.sub(light.position).normalize();
-        Vec3 up = Math.abs(dir.y) > 0.98f ? new Vec3(0, 0, 1) : new Vec3(0, 1, 0);
-        Mat4 lightView = Mat4.lookAt(light.position, sceneCenter, up);
-        Mat4 lightProjection = Mat4.perspective((float) Math.toRadians(65), 1f, 0.5f, 30f);
 
         List<SceneNode> casters = new ArrayList<SceneNode>();
         for (int i = 0; i < meshes.size(); i++) {
             casters.add(new SceneNode(meshes.get(i), models.get(i)));
         }
-        return ShadowMap.render(casters, lightView, lightProjection, resolution, resolution);
+
+        if (light.shadowCascades <= 1) {
+            Vec3 dir = sceneCenter.sub(light.position).normalize();
+            Vec3 up = Math.abs(dir.y) > 0.98f ? new Vec3(0, 0, 1) : new Vec3(0, 1, 0);
+            Mat4 lightView = Mat4.lookAt(light.position, sceneCenter, up);
+            Mat4 lightProjection = Mat4.perspective((float) Math.toRadians(65), 1f, 0.5f, 30f);
+            return ShadowMap.render(casters, lightView, lightProjection, resolution, resolution);
+        }
+
+        Vec3[] basis = CascadedShadowMap.cameraBasis(cameraPos, sceneCenter, worldUp);
+        return CascadedShadowMap.build(casters, light.position, sceneCenter,
+                cameraPos, basis[0], basis[1], basis[2], fovY, aspect, cameraNear, cameraFar,
+                light.shadowCascades, resolution);
     }
 
     private static Mesh buildMesh(RayPhongSnapshot.Obj slot) {

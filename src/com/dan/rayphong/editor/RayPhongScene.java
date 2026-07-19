@@ -28,6 +28,17 @@ public final class RayPhongScene {
         public float specularK;
         public float shininess;
 
+        // Optionale Texturen — null bedeutet "keine", genau wie bei objPath.
+        public String diffuseMapPath;
+        public String specularMapPath;
+        public String normalMapPath;
+        public float normalMapStrength = 1.0f; // 0 = kein Effekt, 1 = normal, >1 = verstärkt
+
+        // Environment-Reflexion (Fresnel) — siehe PhongMaterial.withReflection().
+        public String environmentMapPath; // null = kein Environment-Bild, prozeduraler Himmel-Fallback
+        public float reflectivity = 0f;   // 0 = kein Spiegel-Effekt (Standard), 1 = voll
+        public float fresnelF0 = 0.04f;   // Basisreflexion bei Frontalblick: 0.02-0.05 dielektrisch, 0.5+ Metall
+
         public ObjectSlot(MeshKind kind, Vec3 position, Color baseColor) {
             this.meshKind = kind;
             this.position = position;
@@ -44,6 +55,8 @@ public final class RayPhongScene {
         public float intensity;
         public boolean shadowEnabled;
         public Vec3 position;
+        /** 1 = klassische Einzel-Shadow-Map (Standard, rückwärtskompatibel), >1 = Cascaded Shadow Maps. */
+        public int shadowCascades = 1;
 
         public LightSlot(Color color, float intensity, boolean shadowEnabled, Vec3 position) {
             this.color = color;
@@ -62,6 +75,10 @@ public final class RayPhongScene {
 
     public Color ambientColor = new Color(0x20, 0x22, 0x2C);
     public float ambientIntensity = 0.3f;
+
+    // Boden-Material
+    public String groundDiffuseMapPath; // null = keine Textur, reine Uniform-Farbe wie bisher
+    public float groundTiling = 4.0f;   // Wiederholungen der Textur über die gesamte Bodenbreite/-tiefe
 
     // Szene / Qualität
     public int shadowResolution = 1024;

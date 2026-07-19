@@ -7,7 +7,7 @@ import java.util.List;
  * Beleuchtungspass. Die Licht-View/Projection-Matrizen werden zusammen mit dem Depth-Buffer
  * gehalten, damit eine beliebige Weltposition später ins Licht-Clip-Space projiziert werden kann.
  */
-public final class ShadowMap {
+public final class ShadowMap implements ShadowSource {
 
     private final int width;
     private final int height;
@@ -90,5 +90,11 @@ public final class ShadowMap {
             return 1f;
         }
         return (float) litSamples / totalSamples;
+    }
+
+    /** {@link ShadowSource}-Overload — {@code cameraPos} wird ignoriert, eine einzelne Map braucht ihn nicht. */
+    @Override
+    public float sampleShadowFactor(Vec3 worldPos, float ndotl, Vec3 cameraPos) {
+        return sampleShadowFactor(worldPos, ndotl);
     }
 }

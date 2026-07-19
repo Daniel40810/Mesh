@@ -105,6 +105,27 @@ public final class Mat4 {
         return new Mat4(v);
     }
 
+    /**
+     * Orthographische Projektion (kein perspektivischer Verzug) — für Cascaded Shadow Maps,
+     * wo jede Kaskade eine eng an ihr Kamera-Frustum-Segment angepasste Box aus Licht-Sicht
+     * bekommt. Gleiche Blickrichtungs-Konvention wie {@link #perspective}: Kamera blickt
+     * entlang -Z, {@code near}/{@code far} sind positive Distanzen (near &lt; far).
+     *
+     * @param left/right/bottom/top Bounding-Box-Grenzen in Licht-View-Raum (x/y)
+     * @param near/far positive Distanzen entlang -Z, die auf NDC [-1,1] abgebildet werden
+     */
+    public static Mat4 orthographic(float left, float right, float bottom, float top, float near, float far) {
+        float[] v = new float[16];
+        v[0] = 2f / (right - left);
+        v[5] = 2f / (top - bottom);
+        v[10] = -2f / (far - near);
+        v[12] = -(right + left) / (right - left);
+        v[13] = -(top + bottom) / (top - bottom);
+        v[14] = -(far + near) / (far - near);
+        v[15] = 1f;
+        return new Mat4(v);
+    }
+
     /** this * o (this wird zuerst logisch "innen" angewendet: result = this ⨯ o). */
     public Mat4 multiply(Mat4 o) {
         float[] a = this.m;

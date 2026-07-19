@@ -10,8 +10,8 @@ import java.util.List;
 
 /**
  * Minimaler Wavefront-OBJ-Parser: liest {@code v} (Positionen), optional {@code vn} (Normalen)
- * und {@code f} (Faces, beliebiges Polygon — wird als Fan trianguliert). Texturkoordinaten
- * ({@code vt}) werden erkannt und ignoriert (kein UV-Mapping in dieser Phase).
+ * und {@code vt} (UV-Texturkoordinaten), sowie {@code f} (Faces, beliebiges Polygon — wird als
+ * Fan trianguliert). Fehlende UVs pro Ecke fallen auf {@link Vec2#ZERO} zurück.
  *
  * <p>Face-Indizes im OBJ-Format sind 1-basiert und dürfen negativ (relativ zum Ende) sein;
  * beides wird unterstützt. Unterstützte Face-Schreibweisen: {@code f v}, {@code f v/vt},
@@ -34,8 +34,10 @@ public final class ObjLoader {
     public static Mesh load(InputStream in) throws IOException {
         List<Vec3> positions = new ArrayList<Vec3>();
         List<Vec3> readNormals = new ArrayList<Vec3>();
+        List<Vec2> readUvs = new ArrayList<Vec2>();
         List<int[]> faceVertexIdx = new ArrayList<int[]>();   // je Face: Positions-Indizes (0-basiert)
         List<int[]> faceNormalIdx = new ArrayList<int[]>();   // parallel dazu, -1 = keine Normale angegeben
+        List<int[]> faceUvIdx = new ArrayList<int[]>();       // parallel dazu, -1 = keine UV angegeben
 
         BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
         String line;
@@ -55,10 +57,13 @@ public final class ObjLoader {
                     positions.add(parseVec3(tok, lineNo));
                 } else if (tok[0].equals("vn")) {
                     readNormals.add(parseVec3(tok, lineNo));
+                } else if (tok[0].equals("vt")) {
+                    readUvs.add(parseVec2(tok, lineNo));
                 } else if (tok[0].equals("f")) {
-                    parseFace(tok, positions.size(), readNormals.size(), faceVertexIdx, faceNormalIdx, lineNo);
+                    parseFace(tok, positions.size(), readNormals.size(), readUvs.size(),
+                            faceVertexIdx, faceNormalIdx, faceUvIdx, lineNo);
                 }
-                // vt und alles andere (o, g, s, mtllib, usemtl, ...) wird ignoriert
+                // alles andere (o, g, s, mtllib, usemtl, ...) wird ignoriert
             }
         } finally {
             reader.close();
@@ -72,26 +77,33 @@ public final class ObjLoader {
         }
 
         boolean hasNormals = !readNormals.isEmpty();
+        boolean hasUvs = !readUvs.isEmpty();
         Vec3[] posArr = positions.toArray(new Vec3[0]);
         Vec3[] normalArr;
+        Vec2[] uvArr;
         int[] faces;
 
-        if (hasNormals) {
-            // OBJ erlaubt, dass dieselbe Position mit unterschiedlichen Normalen auftaucht
-            // (z. B. scharfe Kanten) — wir übernehmen die im Face referenzierte Normale direkt
-            // und lassen dafür Positionen ggf. dupliziert in einer neuen, konsistenten Vertex-Liste
-            // zusammenfassen (Position+Normale-Paar = ein Vertex, wie bei MeshFactory.cube()).
+        if (hasNormals || hasUvs) {
+            // OBJ erlaubt, dass dieselbe Position mit unterschiedlichen Normalen/UVs auftaucht
+            // (z. B. scharfe Kanten, UV-Nähte) — wir übernehmen die im Face referenzierten Werte
+            // direkt und lassen dafür Positionen ggf. dupliziert in einer neuen, konsistenten
+            // Vertex-Liste zusammenfassen (Position+Normale+UV-Tripel = ein Vertex, wie bei
+            // MeshFactory.cube()).
             List<Vec3> outPositions = new ArrayList<Vec3>();
             List<Vec3> outNormals = new ArrayList<Vec3>();
+            List<Vec2> outUvs = new ArrayList<Vec2>();
             List<Integer> outFaces = new ArrayList<Integer>();
 
             for (int f = 0; f < faceVertexIdx.size(); f++) {
                 int[] vIdx = faceVertexIdx.get(f);
                 int[] nIdx = faceNormalIdx.get(f);
+                int[] uIdx = faceUvIdx.get(f);
                 for (int corner = 0; corner < vIdx.length; corner++) {
                     outPositions.add(posArr[vIdx[corner]]);
                     int ni = nIdx[corner];
                     outNormals.add(ni >= 0 ? readNormals.get(ni) : Vec3.ZERO);
+                    int ui = uIdx[corner];
+                    outUvs.add(ui >= 0 ? readUvs.get(ui) : Vec2.ZERO);
                 }
                 // Fan-Triangulierung des (evtl. n-eckigen) Polygons
                 for (int corner = 1; corner < vIdx.length - 1; corner++) {
@@ -104,6 +116,7 @@ public final class ObjLoader {
 
             posArr = outPositions.toArray(new Vec3[0]);
             normalArr = outNormals.toArray(new Vec3[0]);
+            uvArr = outUvs.toArray(new Vec2[0]);
             faces = toIntArray(outFaces);
 
             // Falls einzelne Ecken keine Normale hatten (gemischtes OBJ) -> Face-Normale nachrechnen
@@ -119,9 +132,22 @@ public final class ObjLoader {
             }
             faces = toIntArray(outFaces);
             normalArr = computeSmoothNormals(posArr, faces);
+            uvArr = new Vec2[posArr.length];
+            java.util.Arrays.fill(uvArr, Vec2.ZERO);
         }
 
-        return new Mesh(posArr, normalArr, faces);
+        return new Mesh(posArr, normalArr, uvArr, faces);
+    }
+
+    private static Vec2 parseVec2(String[] tok, int lineNo) {
+        if (tok.length < 3) {
+            throw new ObjParseException("Zeile " + lineNo + ": erwarte 2 UV-Koordinaten, war: " + String.join(" ", tok));
+        }
+        try {
+            return new Vec2(Float.parseFloat(tok[1]), Float.parseFloat(tok[2]));
+        } catch (NumberFormatException ex) {
+            throw new ObjParseException("Zeile " + lineNo + ": ungültige Zahl in " + String.join(" ", tok));
+        }
     }
 
     // ----------------------------------------------------------------------
@@ -137,14 +163,16 @@ public final class ObjLoader {
         }
     }
 
-    private static void parseFace(String[] tok, int vertexCount, int normalCount,
-                                   List<int[]> outVertexIdx, List<int[]> outNormalIdx, int lineNo) {
+    private static void parseFace(String[] tok, int vertexCount, int normalCount, int uvCount,
+                                   List<int[]> outVertexIdx, List<int[]> outNormalIdx, List<int[]> outUvIdx,
+                                   int lineNo) {
         int cornerCount = tok.length - 1;
         if (cornerCount < 3) {
             throw new ObjParseException("Zeile " + lineNo + ": Face braucht mindestens 3 Ecken");
         }
         int[] vIdx = new int[cornerCount];
         int[] nIdx = new int[cornerCount];
+        int[] uIdx = new int[cornerCount];
         for (int i = 0; i < cornerCount; i++) {
             String[] parts = tok[i + 1].split("/", -1);
             vIdx[i] = resolveIndex(parts[0], vertexCount, lineNo);
@@ -153,9 +181,15 @@ public final class ObjLoader {
             } else {
                 nIdx[i] = -1;
             }
+            if (parts.length >= 2 && parts[1].length() > 0) {
+                uIdx[i] = resolveIndex(parts[1], uvCount, lineNo);
+            } else {
+                uIdx[i] = -1;
+            }
         }
         outVertexIdx.add(vIdx);
         outNormalIdx.add(nIdx);
+        outUvIdx.add(uIdx);
     }
 
     /** OBJ-Indizes sind 1-basiert; negative Werte zählen relativ vom Ende der bisherigen Liste. */
